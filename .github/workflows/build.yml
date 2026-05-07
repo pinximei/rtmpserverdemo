@@ -1,4 +1,4 @@
-name: Build (manual)
+name: Build
 
 on:
   workflow_dispatch:
@@ -12,6 +12,9 @@ on:
           - Release
           - Debug
           - RelWithDebInfo
+  push:
+    tags:
+      - 'v*'
 
 jobs:
   build:
@@ -22,6 +25,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Resolve build type
+        id: cfg
+        shell: bash
+        run: |
+          if [ -n "${{ inputs.build_type }}" ]; then
+            echo "build_type=${{ inputs.build_type }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "build_type=Release" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup MSVC
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -31,16 +44,41 @@ jobs:
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
 
       - name: Build
-        run: cmake --build build --config ${{ inputs.build_type }} --parallel
+        run: cmake --build build --config ${{ steps.cfg.outputs.build_type }} --parallel
 
       - name: List output
         run: |
-          dir build\${{ inputs.build_type }}
+          dir build\${{ steps.cfg.outputs.build_type }}
         shell: cmd
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RtmpDesktopStreamer-${{ inputs.build_type }}-x64
-          path: build/${{ inputs.build_type }}/RtmpDesktopStreamer.exe
+          name: RtmpDesktopStreamer-${{ steps.cfg.outputs.build_type }}-x64
+          path: build/${{ steps.cfg.outputs.build_type }}/RtmpDesktopStreamer.exe
           if-no-files-found: error
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download exe artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: RtmpDesktopStreamer-Release-x64
+          path: dist
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/RtmpDesktopStreamer.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false
